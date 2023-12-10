@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import torch.distributed as dist
 from torchvision.utils import save_image
 
 from torchmetrics import MetricCollection
@@ -26,11 +27,10 @@ from loss.adversarial_loss import AdversarialLoss
 from utils.logger import get_logger, StatusTracker
 from utils.misc import find_resume_checkpoint, check_freq, init_seeds, create_exp_dir, get_time_str, get_bare_model
 from utils.optimizer import optimizer_to_device
-from utils.dist import init_distributed_mode, broadcast_objects, get_world_size, is_dist_avail_and_initialized, get_local_rank, main_process_only
+from utils.dist import get_rank, init_distributed_mode, broadcast_objects, get_world_size, is_dist_avail_and_initialized, get_local_rank, is_main_process, main_process_only
 
 from data import DS
 from utils.data import get_data_generator, get_dataloader
-from torch.utils.data import DataLoader
 from torchvision import transforms
 
 
@@ -44,7 +44,7 @@ class Trainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # seeds
-        init_seeds(self.cfg.seed)
+        init_seeds(self.cfg.seed + get_rank())
 
         # exp dir
         self.exp_dir = create_exp_dir(
@@ -66,7 +66,7 @@ class Trainer:
         self.micro_batch = self.cfg.dataloader.micro_batch
         if self.micro_batch == 0:
             self.micro_batch = self.cfg.dataloader.batch_size
-            
+
         # data
         self.train_set, self.valid_set, self.train_loader, self.valid_loader = self.create_data()
         effective_batch = self.cfg.dataloader.batch_size * get_world_size()
@@ -290,6 +290,9 @@ class Trainer:
             if check_freq(self.cfg.train.evaluate_freq, self.cur_step):
                 eval_status = self.evaluate(self.valid_loader)
                 self.status_tracker.track_status('Eval', eval_status, self.cur_step)
+            # synchronizes all processes
+            if is_dist_avail_and_initialized():
+                dist.barrier()
 
             self.cur_step += 1
         
@@ -420,7 +423,7 @@ class Trainer:
         self.inpaintnet.eval()
         self.refinenet.eval()
 
-        pbar = tqdm.tqdm(dataloader, desc='Evaluating', leave=False)
+        pbar = tqdm.tqdm(dataloader, desc='Evaluating', leave=False, disable=not is_main_process())
         for X, gt_img, mask in pbar:
             X = X.to(device=self.device, dtype=torch.float32)
             gt_img = gt_img.to(device=self.device, dtype=torch.float32)
@@ -452,7 +455,7 @@ class Trainer:
         self.inpaintnet.eval()
         self.refinenet.eval()
         show_imgs = []
-        for i in tqdm.tqdm(range(6), desc='Sampling', leave=False):
+        for i in tqdm.tqdm(range(6), desc='Sampling', leave=False, disable=not is_main_process()):
             X, gt_img, mask = self.valid_set[i]
             X = X.to(device=self.device, dtype=torch.float32).unsqueeze(0)
             gt_img = gt_img.to(device=self.device, dtype=torch.float32).unsqueeze(0)
