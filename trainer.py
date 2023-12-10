@@ -29,7 +29,7 @@ from utils.optimizer import optimizer_to_device
 from utils.dist import init_distributed_mode, broadcast_objects, get_world_size, is_dist_avail_and_initialized, get_local_rank, main_process_only
 
 from data import DS
-from utils.data import get_data_generator
+from utils.data import get_data_generator, get_dataloader
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -66,45 +66,13 @@ class Trainer:
         self.micro_batch = self.cfg.dataloader.micro_batch
         if self.micro_batch == 0:
             self.micro_batch = self.cfg.dataloader.batch_size
+            
         # data
-        size = [self.cfg.data.img_size,self.cfg.data.img_size]
-        train_tf = transforms.Compose([
-            transforms.Resize(size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor()
-        ])
-        val_tf = transforms.Compose([
-            transforms.Resize(size),
-            transforms.ToTensor()
-        ])
-        self.train_set = DS(
-            root=self.cfg.data.dataroot,
-            transform=train_tf
-        )
-        self.valid_set = DS(
-            root=self.cfg.val.dataroot,
-            transform=val_tf
-        )
-        self.train_loader = DataLoader(
-            dataset=self.train_set,
-            shuffle=True,
-            drop_last=True,
-            batch_size=self.cfg.dataloader.batch_size,
-            num_workers=self.cfg.dataloader.num_workers,
-            pin_memory=self.cfg.dataloader.pin_memory,
-            prefetch_factor=self.cfg.dataloader.prefetch_factor
-        )
-        self.valid_loader = DataLoader(
-            dataset=self.valid_set,
-            shuffle=False,
-            drop_last=False,
-            batch_size=self.micro_batch,
-            num_workers=self.cfg.dataloader.num_workers,
-            pin_memory=self.cfg.dataloader.pin_memory,
-            prefetch_factor=self.cfg.dataloader.prefetch_factor
-        )
+        self.train_set, self.valid_set, self.train_loader, self.valid_loader = self.create_data()
+        effective_batch = self.cfg.dataloader.batch_size * get_world_size()
         self.logger.info(f'Size of training set: {len(self.train_set)}')
         self.logger.info(f'Batch size per device: {self.cfg.dataloader.batch_size}')
+        self.logger.info(f'Effective batch size: {effective_batch}')
 
         # tracker
         self.status_tracker = StatusTracker(
@@ -165,9 +133,11 @@ class Trainer:
         vgg = VGG19FeatureExtractor()
         vgg.to(device=self.device)
 
+        # resume
         if self.cfg.train.pretrained is not None:
             self.load_pretrained(self.cfg.train.pretrained)
         
+        # load
         self.cur_step = 0
         if self.cfg.train.resume is not None:
             resume_path = find_resume_checkpoint(self.exp_dir, self.cfg.train.resume)
@@ -507,3 +477,42 @@ class Trainer:
         
         show_imgs = torch.stack(show_imgs, dim=0)
         save_image(show_imgs, savepath, nrow=len(show_imgs) // 6, normalize=True, value_range=(0, 1))
+    
+    def create_data(self):
+        size = [self.cfg.data.img_size,self.cfg.data.img_size]
+        train_tf = transforms.Compose([
+            transforms.Resize(size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor()
+        ])
+        val_tf = transforms.Compose([
+            transforms.Resize(size),
+            transforms.ToTensor()
+        ])
+        train_set = DS(
+            root=self.cfg.data.dataroot,
+            transform=train_tf
+        )
+        valid_set = DS(
+            root=self.cfg.val.dataroot,
+            transform=val_tf
+        )
+        train_loader = get_dataloader(
+            dataset=train_set,
+            shuffle=True,
+            drop_last=True,
+            batch_size=self.cfg.dataloader.batch_size,
+            num_workers=self.cfg.dataloader.num_workers,
+            pin_memory=self.cfg.dataloader.pin_memory,
+            prefetch_factor=self.cfg.dataloader.prefetch_factor,
+        )
+        valid_loader = get_dataloader(
+            dataset=valid_set,
+            shuffle=False,
+            drop_last=False,
+            batch_size=self.micro_batch,
+            num_workers=self.cfg.dataloader.num_workers,
+            pin_memory=self.cfg.dataloader.pin_memory,
+            prefetch_factor=self.cfg.dataloader.prefetch_factor,
+        )
+        return train_set, valid_set, train_loader, valid_loader
