@@ -2,7 +2,10 @@ import os
 import tqdm
 import logging
 
+from utils.dist import is_main_process, main_process_only
 
+
+@main_process_only
 def get_tb_writer(log_dir):
     from torch.utils.tensorboard import SummaryWriter
     os.makedirs(log_dir, exist_ok=True)
@@ -57,15 +60,15 @@ def get_logger(name='exp', log_file=None, log_level=logging.INFO, file_mode='w',
         stream_handler = TqdmLoggingHandler()
     handlers = [stream_handler]
 
-    if log_file is not None:
+    if is_main_process() and log_file is not None:
         file_handler = logging.FileHandler(log_file, file_mode)
         handlers.append(file_handler)
     
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     for handler in handlers:
         handler.setFormatter(formatter)
-        handler.setLevel(log_level)
+        handler.setLevel(log_level if is_main_process() else logging.ERROR)
         logger.addHandler(handler)
-    logger.setLevel(log_level)
+    logger.setLevel(log_level if is_main_process() else logging.ERROR)
     
     return logger
