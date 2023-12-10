@@ -329,10 +329,10 @@ class Trainer:
             with cm1, cm2, cm3:
                 recX, projs, conf_mask_hier = self.inpaintnet(X, mask)
                 if self.args.phase == 1:
-                    refX = self.refinenet(recX, mask)
+                    refX = self.refinenet(recX.detach(), mask)
                 else:
                     pred_mask = F.interpolate(conf_mask_hier['pred_masks'][0].float(), X.shape[-2:])
-                    refX = self.refinenet(recX, pred_mask)
+                    refX = self.refinenet(recX.detach(), pred_mask)
         
                 # hierarchical contrastive loss
                 mask_resized = F.interpolate(mask, size=conf_mask_hier['pred_masks'][0].shape[-2:])
@@ -397,16 +397,17 @@ class Trainer:
             X = batch_X[i:i+self.micro_batch].to(device=self.device, dtype=torch.float32)
             gt_img = batch_gt_img[i:i+self.micro_batch].to(device=self.device, dtype=torch.float32)
             mask = batch_mask[i:i+self.micro_batch].to(device=self.device, dtype=torch.float32)
+            
             # no need to synchronize gradient before the last micro batch
             no_sync = is_dist_avail_and_initialized() and (i + self.micro_batch) < batch_size
             cm = self.pdisc.no_sync() if no_sync else nullcontext()
             with cm:
                 recX, projs, conf_mask_hier = self.inpaintnet(X, mask)
                 if self.args.phase == 1:
-                    refX = self.refinenet(recX, mask)
+                    refX = self.refinenet(recX.detach(), mask)
                 else:
                     pred_mask = F.interpolate(conf_mask_hier['pred_masks'][0].float(), X.shape[-2:])
-                    refX = self.refinenet(recX, pred_mask)
+                    refX = self.refinenet(recX.detach(), pred_mask)
                 
                 lossD = self.patch_adv.forward_D(realX=gt_img, fakeX=refX.detach())
                 lossD.backward()
@@ -422,6 +423,9 @@ class Trainer:
     def evaluate(self, dataloader):
         self.inpaintnet.eval()
         self.refinenet.eval()
+
+        self.metric_image.reset()
+        self.metric_mask.reset()
 
         pbar = tqdm.tqdm(dataloader, desc='Evaluating', leave=False, disable=not is_main_process())
         for X, gt_img, mask in pbar:
@@ -452,8 +456,10 @@ class Trainer:
     @main_process_only
     @torch.no_grad()
     def sample(self, savepath: str):
-        self.inpaintnet.eval()
-        self.refinenet.eval()
+        inpaintnet = get_bare_model(self.inpaintnet)
+        refinenet = get_bare_model(self.refinenet)
+        inpaintnet.eval()
+        refinenet.eval()
         show_imgs = []
         for i in tqdm.tqdm(range(6), desc='Sampling', leave=False, disable=not is_main_process()):
             X, gt_img, mask = self.valid_set[i]
@@ -461,12 +467,12 @@ class Trainer:
             gt_img = gt_img.to(device=self.device, dtype=torch.float32).unsqueeze(0)
             mask = mask.to(device=self.device, dtype=torch.float32).unsqueeze(0)
 
-            recX, projs, conf_mask_hier = self.inpaintnet(X, mask)
+            recX, projs, conf_mask_hier = inpaintnet(X, mask)
             if self.args.phase == 1:
-                refX = self.refinenet(recX, mask)
+                refX = refinenet(recX, mask)
             else:
                 pred_mask = F.interpolate(conf_mask_hier['pred_masks'][0].float(), X.shape[-2:])
-                refX = self.refinenet(recX, pred_mask)
+                refX = refinenet(recX, pred_mask)
             
             shape = (self.cfg.data.img_size, self.cfg.data.img_size)
             pred_masks = [F.interpolate(m.float().cpu(), size=shape) for m in conf_mask_hier['pred_masks']]
