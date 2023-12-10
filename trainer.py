@@ -361,40 +361,40 @@ class Trainer:
                     pred_mask = F.interpolate(conf_mask_hier['pred_masks'][0].float(), X.shape[-2:])
                     refX = self.refinenet(recX, pred_mask)
         
-                    # hierarchical contrastive loss
-                    mask_resized = F.interpolate(mask, size=conf_mask_hier['pred_masks'][0].shape[-2:])
-                    losses_contrast = self.hier_contrast(
-                        features=projs,
-                        valid_masks=conf_mask_hier['valid_masks'],
-                        invalid_masks=conf_mask_hier['invalid_masks'],
-                        confs=conf_mask_hier['confs'],
-                        acc_valid_masks=conf_mask_hier['acc_valid_masks'],
-                        acc_invalid_masks=conf_mask_hier['acc_invalid_masks'],
-                        gt_mask=mask_resized,
-                    )
-                    loss_contrast = sum(losses_contrast)
-                    # reconstruction loss
-                    loss_rec = self.l1(recX, gt_img)
-                    loss_rec_refined = self.l1(refX, gt_img)
-                    # perceptual loss
-                    loss_perc = self.perceptual(recX, gt_img)
-                    loss_perc_refined = self.perceptual_refined(refX, gt_img)
-                    # adversarial loss
-                    loss_adv_refined = self.patch_adv.forward_G(fakeX=refX)
-                    # classifier loss
-                    scores = self.classifier(conf_mask_hier['centers'][-1]).squeeze(-1)
-                    loss_cls = (self.bcewithlogits(scores[:, 0], torch.ones((recX.shape[0], ), device=self.device)) +
-                                self.bcewithlogits(scores[:, 1], torch.zeros((recX.shape[0], ), device=self.device))) / 2
-                    # total
-                    loss_total = (loss_contrast * self.cfg.train.lambda_contrast +
-                                    loss_rec * self.cfg.train.lambda_rec +
-                                    loss_rec_refined * self.cfg.train.lambda_rec_refined +
-                                    loss_perc * self.cfg.train.lambda_perc +
-                                    loss_perc_refined * self.cfg.train.lambda_perc_refined +
-                                    loss_adv_refined * self.cfg.train.lambda_adv_refined +
-                                    loss_cls)
-                    loss_total = loss_total * X.shape[0] / batch_size
-                    loss_total.backward()
+                # hierarchical contrastive loss
+                mask_resized = F.interpolate(mask, size=conf_mask_hier['pred_masks'][0].shape[-2:])
+                losses_contrast = self.hier_contrast(
+                    features=projs,
+                    valid_masks=conf_mask_hier['valid_masks'],
+                    invalid_masks=conf_mask_hier['invalid_masks'],
+                    confs=conf_mask_hier['confs'],
+                    acc_valid_masks=conf_mask_hier['acc_valid_masks'],
+                    acc_invalid_masks=conf_mask_hier['acc_invalid_masks'],
+                    gt_mask=mask_resized,
+                )
+                loss_contrast = sum(losses_contrast)
+                # reconstruction loss
+                loss_rec = self.l1(recX, gt_img)
+                loss_rec_refined = self.l1(refX, gt_img)
+                # perceptual loss
+                loss_perc = self.perceptual(recX, gt_img)
+                loss_perc_refined = self.perceptual_refined(refX, gt_img)
+                # adversarial loss
+                loss_adv_refined = self.patch_adv.forward_G(fakeX=refX)
+                # classifier loss
+                scores = self.classifier(conf_mask_hier['centers'][-1]).squeeze(-1)
+                loss_cls = (self.bcewithlogits(scores[:, 0], torch.ones((recX.shape[0], ), device=self.device)) +
+                            self.bcewithlogits(scores[:, 1], torch.zeros((recX.shape[0], ), device=self.device))) / 2
+                # total
+                loss_total = (loss_contrast * self.cfg.train.lambda_contrast +
+                                loss_rec * self.cfg.train.lambda_rec +
+                                loss_rec_refined * self.cfg.train.lambda_rec_refined +
+                                loss_perc * self.cfg.train.lambda_perc +
+                                loss_perc_refined * self.cfg.train.lambda_perc_refined +
+                                loss_adv_refined * self.cfg.train.lambda_adv_refined +
+                                loss_cls)
+                loss_total = loss_total * X.shape[0] / batch_size
+                loss_total.backward()
 
             self.loss_meter_gen.update(kvs=dict(
                 loss_rec=loss_rec.detach(),
