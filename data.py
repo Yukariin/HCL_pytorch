@@ -1,10 +1,12 @@
 import os
+import random
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import torch
 from torch.utils import data
+import torchvision.transforms.functional as TF
 
 
 class InfiniteSampler(data.sampler.Sampler):
@@ -48,13 +50,19 @@ class DS(data.Dataset):
         sample_path = self.samples[index]
         sample = Image.open(sample_path).convert('RGB')
 
+        enhancer = ImageEnhance.Brightness(sample)
+        f = np.random.uniform(0.1, 0.5)
+        darken = enhancer.enhance(f)
+
         if self.transform is not None:
             sample = self.transform(sample)
+            darken = self.transform(darken)
 
         mask = self.random_mask()
         mask = torch.from_numpy(mask)
-
-        masked = sample * (1.-mask)
+        
+        masked = sample*(1.-mask) + darken*mask
+        mask[mask > 0] = 1.
 
         return masked, sample, mask
     
@@ -92,5 +100,9 @@ class DS(data.Dataset):
             mask = np.fliplr(mask)
         if np.random.random() < 0.5:
             mask = np.flipud(mask)
+        
+        if random.random() < 0.6:
+            feather = random.randint(1, 3)
+            mask = (cv2.blur(mask, (feather, feather)))
 
         return mask.reshape((1,)+mask.shape).astype(np.float32)
