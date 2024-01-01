@@ -492,11 +492,13 @@ class Trainer:
         train_tf = transforms.Compose([
             transforms.Resize(size),
             transforms.RandomHorizontalFlip(),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize([0.5]*3, [0.5]*3)
         ])
         val_tf = transforms.Compose([
             transforms.Resize(size),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize([0.5]*3, [0.5]*3)
         ])
         train_set = DS(
             root=self.cfg.data.dataroot,

@@ -50,18 +50,16 @@ class DS(data.Dataset):
         sample_path = self.samples[index]
         sample = Image.open(sample_path).convert('RGB')
 
-        enhancer = ImageEnhance.Brightness(sample)
-        f = np.random.uniform(0.1, 0.5)
-        darken = enhancer.enhance(f)
-
         if self.transform is not None:
             sample = self.transform(sample)
-            darken = self.transform(darken)
 
-        mask = self.random_mask()
+        mask = self.random_mask(sample.shape[1], sample.shape[2])
         mask = torch.from_numpy(mask)
+
+        f = 1 - np.random.uniform(0.5, 0.9)
+        c = TF.adjust_brightness(sample, f)
         
-        masked = sample*(1.-mask) + darken*mask
+        masked = sample*(1.-mask) + c*mask
         mask[mask > 0] = 1.
 
         return masked, sample, mask
